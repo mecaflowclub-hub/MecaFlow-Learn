@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+venv311/
+.env
+*.log
+.git
+.gitignore
+uploads/*
+!uploads/reference-files/
+!uploads/reference-files/**
+!uploads/drawings/
+!uploads/drawings/**

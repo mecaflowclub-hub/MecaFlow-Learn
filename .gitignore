@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+venv311/
+ENV/
+.env
+
+# Node
+node_modules/
+
+# Uploads and Data
+uploads/*
+!uploads/reference-files/
+!uploads/reference-files/**
+!uploads/student-files/
+!uploads/student-files/.gitkeep
+!uploads/drawings/
+!uploads/drawings/**
+temp/
+*.tmp
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+*.db
+*.sqlite3
+
+# MongoDB
+*.mongodb
