@@ -1172,9 +1172,29 @@ async def submit_exercise(
 
                 # Pour les exercices spécifiques (surfacing et shell)
                 if level == "advanced" and order in [2, 15, 16, 17]:  # Exercice 2 (bouteille) + exercices de surfacing
-                    from services.occComparison import compare_shell_models
-                    logger.info("Comparing shell/surface models...")
-                    cad_result = compare_shell_models(path, reference_path)
+                    try:
+                        from services.occComparison import compare_shell_models, compare_models
+                        logger.info("Comparing shell/surface models...")
+                        
+                        # For exercise 2 (bottle), try both solid and shell comparison
+                        if order == 2:
+                            try:
+                                # Try solid comparison first
+                                logger.info("Trying solid comparison first...")
+                                cad_result = compare_models(path, reference_path)
+                                if not cad_result.get("success", False):
+                                    # If solid comparison fails, try shell comparison
+                                    logger.info("Solid comparison failed, trying shell comparison...")
+                                    cad_result = compare_shell_models(path, reference_path)
+                            except Exception as e:
+                                logger.error(f"Error in model comparison: {str(e)}")
+                                cad_result = {"success": False, "error": f"Error comparing models: {str(e)}"}
+                        else:
+                            # For other surface exercises, use shell comparison
+                            cad_result = compare_shell_models(path, reference_path)
+                    except Exception as e:
+                        logger.error(f"Error in model comparison: {str(e)}")
+                        cad_result = {"success": False, "error": f"Error comparing models: {str(e)}"}
                 else:
                     # Lire et analyser le fichier soumis pour les pièces solides
                     sub_shape = read_step_file(path)

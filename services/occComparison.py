@@ -1,4 +1,7 @@
 from typing import Dict, List, Any, Tuple
+import asyncio
+from functools import wraps
+import concurrent.futures
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.BRepGProp import brepgprop_VolumeProperties, brepgprop_SurfaceProperties
 from OCC.Core.GProp import GProp_GProps
@@ -206,9 +209,30 @@ def get_shape_properties(shape: TopoDS_Shape):
     raise ValueError("No valid geometry (solid, shell, or face) found in shape.")
 
 # -------------------------------
+# Timeout Decorator
+# -------------------------------
+
+def timeout_after(seconds):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+                try:
+                    return future.result(timeout=seconds)
+                except concurrent.futures.TimeoutError:
+                    return {
+                        "success": False,
+                        "error": f"Operation timed out after {seconds} seconds. The model may be too complex."
+                    }
+        return wrapper
+    return decorator
+
+# -------------------------------
 # Comparison
 # -------------------------------
 
+@timeout_after(30)  # 30 second timeout
 def compare_models(submitted_path: str, reference_path: str, tol: float = 1e-3) -> Dict[str, Any]:
     """Compare two STEP models (can handle both single parts and assemblies)."""
     sub_shape = read_step_file(submitted_path)
