@@ -13,6 +13,116 @@ import numpy as np
 # STEP file utilities
 # -------------------------------
 
+def is_shell_model(shape: TopoDS_Shape) -> bool:
+    """Determine if a shape is primarily a shell model (no solids)."""
+    solid_count = count_subshapes(shape, TopAbs_SOLID)
+    shell_count = count_subshapes(shape, TopAbs_SHELL)
+    return solid_count == 0 and shell_count > 0
+
+def get_model_properties(shape: TopoDS_Shape) -> Dict[str, float]:
+    """Get properties that work for both solid and shell models."""
+    props = GProp_GProps()
+    
+    # If it's a shell, use surface properties
+    if is_shell_model(shape):
+        brepgprop_SurfaceProperties(shape, props)
+    else:
+        brepgprop_VolumeProperties(shape, props)
+    
+    # Get bounding box for basic dimensions
+    bbox = Bnd_Box()
+    brepbndlib.Add(shape, bbox)
+    xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+    
+    # Calculate key properties
+    height = zmax - zmin
+    max_diameter = max(xmax - xmin, ymax - ymin)
+    
+    # Get center of mass
+    com = props.CentreOfMass()
+    
+    return {
+        "height": height,
+        "diameter": max_diameter,
+        "com_z": com.Z(),  # Important for symmetry check
+        "com_x": com.X(),
+        "com_y": com.Y()
+    }
+
+def compare_bottle_model(submitted_path: str, reference_path: str, timeout: int = 30) -> Dict[str, Any]:
+    """
+    Specialized comparison for bottle exercise (Exercise 2).
+    Handles both solid and shell representations with optimized checks.
+    """
+    try:
+        # Load models
+        submitted = read_step_file(submitted_path)
+        reference = read_step_file(reference_path)
+        
+        # Get properties for both models
+        sub_props = get_model_properties(submitted)
+        ref_props = get_model_properties(reference)
+        
+        # Compare dimensions with appropriate tolerances
+        height_tol = 0.02  # 2% tolerance
+        diameter_tol = 0.02
+        
+        # Calculate dimensional scores
+        height_ratio = min(sub_props["height"], ref_props["height"]) / max(sub_props["height"], ref_props["height"])
+        diameter_ratio = min(sub_props["diameter"], ref_props["diameter"]) / max(sub_props["diameter"], ref_props["diameter"])
+        
+        height_score = 100 * height_ratio
+        diameter_score = 100 * diameter_ratio
+        
+        # Check symmetry using center of mass
+        com_offset = ((sub_props["com_x"]**2 + sub_props["com_y"]**2)**0.5) / sub_props["diameter"]
+        symmetry_score = 100 * (1 - min(1, com_offset * 10))  # Penalize off-center COM
+        
+        # Calculate topology score
+        sub_face_count = count_subshapes(submitted, TopAbs_FACE)
+        ref_face_count = count_subshapes(reference, TopAbs_FACE)
+        topology_score = 100 * (1 - min(1, abs(sub_face_count - ref_face_count) / max(ref_face_count, 1)))
+        
+        # Weighted scoring
+        weights = {
+            "height": 0.3,
+            "diameter": 0.3,
+            "symmetry": 0.2,
+            "topology": 0.2
+        }
+        
+        global_score = (
+            weights["height"] * height_score +
+            weights["diameter"] * diameter_score +
+            weights["symmetry"] * symmetry_score +
+            weights["topology"] * topology_score
+        )
+        
+        # Round scores for display
+        global_score = round(global_score, 1)
+        height_score = round(height_score, 1)
+        diameter_score = round(diameter_score, 1)
+        symmetry_score = round(symmetry_score, 1)
+        topology_score = round(topology_score, 1)
+        
+        return {
+            "success": global_score >= 75,
+            "global_score": global_score,
+            "details": {
+                "height": {"score": height_score, "ok": height_score >= 90},
+                "diameter": {"score": diameter_score, "ok": diameter_score >= 90},
+                "symmetry": {"score": symmetry_score, "ok": symmetry_score >= 80},
+                "topology": {"score": topology_score, "ok": topology_score >= 80}
+            },
+            "message": "Comparaison optimisée pour la bouteille"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error comparing bottle models: {str(e)}"
+        }
+
 def read_step_file(filename: str) -> TopoDS_Shape:
     reader = STEPControl_Reader()
     status = reader.ReadFile(filename)
@@ -204,73 +314,6 @@ def get_shape_properties(shape: TopoDS_Shape):
         return get_face_properties(faces[0])
         
     raise ValueError("No valid geometry (solid, shell, or face) found in shape.")
-
-# -------------------------------
-# Special Exercise Comparisons
-# -------------------------------
-
-def compare_bottle(submitted_path: str, reference_path: str) -> Dict[str, Any]:
-    """Optimized comparison specifically for Exercise 2 (bottle).
-    Handles both solid and shell representations with minimal computation."""
-    try:
-        # Read shapes
-        sub_shape = read_step_file(submitted_path)
-        ref_shape = read_step_file(reference_path)
-        
-        # Get properties with minimal computation
-        bbox_sub = Bnd_Box()
-        bbox_ref = Bnd_Box()
-        brepbndlib.Add(sub_shape, bbox_sub)
-        brepbndlib.Add(ref_shape, bbox_ref)
-        
-        # Get bounding box dimensions
-        xmin_s, ymin_s, zmin_s, xmax_s, ymax_s, zmax_s = bbox_sub.Get()
-        xmin_r, ymin_r, zmin_r, xmax_r, ymax_r, zmax_r = bbox_ref.Get()
-        
-        # Calculate key dimensions
-        height_sub = zmax_s - zmin_s
-        height_ref = zmax_r - zmin_r
-        diameter_sub = max(xmax_s - xmin_s, ymax_s - ymin_s)
-        diameter_ref = max(xmax_r - xmin_r, ymax_r - ymin_r)
-        
-        # Compare dimensions with generous tolerance
-        tol = 2e-2  # 2% tolerance
-        height_ok = abs(height_sub - height_ref) <= tol * height_ref
-        diameter_ok = abs(diameter_sub - diameter_ref) <= tol * diameter_ref
-        
-        # Calculate dimensional scores
-        height_score = 100 - min(100, 100 * abs(height_sub - height_ref) / height_ref)
-        diameter_score = 100 - min(100, 100 * abs(diameter_sub - diameter_ref) / diameter_ref)
-        
-        # Get topology for basic shape verification
-        num_faces_sub = count_subshapes(sub_shape, TopAbs_FACE)
-        num_faces_ref = count_subshapes(ref_shape, TopAbs_FACE)
-        
-        # Allow some variation in face count for shell vs solid
-        faces_ok = abs(num_faces_sub - num_faces_ref) <= 2
-        
-        # Calculate final score
-        dim_score = (height_score + diameter_score) / 2
-        face_score = 100 if faces_ok else max(0, 100 - abs(num_faces_sub - num_faces_ref) * 10)
-        
-        global_score = round(0.7 * dim_score + 0.3 * face_score, 1)
-        
-        return {
-            "success": global_score >= 75,  # More lenient threshold
-            "global_score": global_score,
-            "details": {
-                "height": {"ok": height_ok, "score": round(height_score, 1)},
-                "diameter": {"ok": diameter_ok, "score": round(diameter_score, 1)},
-                "topology": {"ok": faces_ok, "score": round(face_score, 1)}
-            },
-            "message": "Comparaison spécifique bouteille"
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error comparing bottle: {str(e)}"
-        }
 
 # -------------------------------
 # Comparison

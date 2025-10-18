@@ -917,11 +917,9 @@ async def submit_exercise(
     level = course.get("level") if course else "unknown"
     order = ex.get("order")
 
-    # --- Special cases for specific exercises ---
-    
-    # Exercise 2 (Bottle) - requires special comparison
+    # --- Special case: Exercise 2 (Bottle) ---
     if order == 2:
-        if ext != ".stp" and ext != ".step":
+        if ext not in [".stp", ".step"]:
             raise HTTPException(status_code=400, detail="Seuls les fichiers STEP sont autorisés pour cet exercice.")
         file_id = str(uuid.uuid4())
         path = os.path.join(UPLOAD_DIR, "student-files", f"{file_id}_{filename}")
@@ -933,10 +931,11 @@ async def submit_exercise(
         if not reference_filename:
             cad_result = {"success": False, "error": "Chemin de référence non défini"}
         else:
+            # Normalize path - ensure it's relative to the backend root
             reference_filename = reference_filename.lstrip('/')
             reference_path = os.path.join(UPLOAD_DIR, "reference-files", os.path.basename(reference_filename))
             
-            logger.info(f"Checking STEP bottle reference file at: {reference_path}")
+            logger.info(f"Checking bottle model at: {reference_path}")
             
             if not os.path.exists(reference_path):
                 cad_result = {
@@ -946,8 +945,8 @@ async def submit_exercise(
                 }
             else:
                 try:
-                    from services.occComparison import compare_bottle
-                    cad_result = compare_bottle(path, reference_path)
+                    from services.occComparison import compare_bottle_model
+                    cad_result = compare_bottle_model(path, reference_path)
                     logger.info(f"Bottle comparison result: {cad_result}")
                 except Exception as e:
                     logger.error(f"Error during bottle comparison: {str(e)}")
@@ -955,8 +954,8 @@ async def submit_exercise(
                         "success": False,
                         "error": f"Erreur lors de la comparaison de la bouteille: {str(e)}"
                     }
-
-    # Exercise 11 (DXF Drawing) special case
+    
+    # --- Special case: Exo 11 (advanced, DXF drawing) ---
     elif level == "advanced" and order == 11:
         if ext != ".dxf":
             raise HTTPException(status_code=400, detail="Seuls les fichiers DXF sont autorisés pour cet exercice.")
