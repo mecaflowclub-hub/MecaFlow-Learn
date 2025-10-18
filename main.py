@@ -917,47 +917,8 @@ async def submit_exercise(
     level = course.get("level") if course else "unknown"
     order = ex.get("order")
 
-    # --- Special case: Exercise 2 (Bottle) ---
-    if order == 2:
-        if ext not in [".stp", ".step"]:
-            raise HTTPException(status_code=400, detail="Seuls les fichiers STEP sont autorisés pour cet exercice.")
-            
-        # Save file with original extension preserved
-        file_id = str(uuid.uuid4())
-        path = os.path.join(UPLOAD_DIR, "student-files", f"{file_id}_{filename}")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as buffer:
-            buffer.write(content)
-        
-        reference_filename = ex.get("solution_file_path")
-        if not reference_filename:
-            cad_result = {"success": False, "error": "Chemin de référence non défini"}
-        else:
-            reference_path = os.path.join(UPLOAD_DIR, "reference-files", os.path.basename(reference_filename))
-            logger.info(f"Comparing bottle files:")
-            logger.info(f"Student: {path}")
-            logger.info(f"Reference: {reference_path}")
-            
-            if not os.path.exists(reference_path):
-                cad_result = {
-                    "success": False,
-                    "error": "Fichier de référence introuvable",
-                    "details": f"Le fichier {reference_path} n'existe pas"
-                }
-            else:
-                try:
-                    from services.occComparison import compare_models
-                    cad_result = compare_models(path, reference_path)
-                    logger.info(f"Bottle comparison result: {json.dumps(cad_result, indent=2)}")
-                except Exception as e:
-                    logger.error(f"Error during bottle comparison: {str(e)}")
-                    cad_result = {
-                        "success": False,
-                        "error": f"Erreur lors de la comparaison: {str(e)}"
-                    }
-
     # --- Special case: Exo 11 (advanced, DXF drawing) ---
-    elif level == "advanced" and order == 11:
+    if level == "advanced" and order == 11:
         if ext != ".dxf":
             raise HTTPException(status_code=400, detail="Seuls les fichiers DXF sont autorisés pour cet exercice.")
         file_id = str(uuid.uuid4())
