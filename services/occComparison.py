@@ -356,3 +356,103 @@ def compare_models(submitted_path: str, reference_path: str, tol: float = 1e-3) 
         feedback["global_score"] = global_score
         feedback["success"] = global_score >= 80
         return feedback
+
+@timeout_after(30)  # 30 second timeout for shell comparisons
+def compare_shell_models(submitted_path: str, reference_path: str, tol: float = 1e-3) -> Dict[str, Any]:
+    """Compare two STEP models that represent shells or surfaces."""
+    try:
+        # Read the STEP files
+        sub_shape = read_step_file(submitted_path)
+        ref_shape = read_step_file(reference_path)
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error reading STEP files: {str(e)}"
+        }
+
+    try:
+        # Get shells from shapes
+        sub_shells = get_shells_from_shape(sub_shape)
+        ref_shells = get_shells_from_shape(ref_shape)
+
+        # If no shells found in submission, try to get shells from solids
+        if not sub_shells:
+            sub_solids = get_solids_from_shape(sub_shape)
+            for solid in sub_solids:
+                shells = get_shells_from_shape(solid)
+                if shells:
+                    sub_shells.extend(shells)
+
+        # If still no shells, use faces directly
+        if not sub_shells:
+            sub_faces = get_faces_from_shape(sub_shape)
+            if sub_faces:
+                sub_shells = [sub_faces[0]]  # Use the first face as a shell
+
+        # Same for reference
+        if not ref_shells:
+            ref_solids = get_solids_from_shape(ref_shape)
+            for solid in ref_solids:
+                shells = get_shells_from_shape(solid)
+                if shells:
+                    ref_shells.extend(shells)
+
+        if not ref_shells:
+            ref_faces = get_faces_from_shape(ref_shape)
+            if ref_faces:
+                ref_shells = [ref_faces[0]]
+
+        # If no valid geometry found
+        if not sub_shells or not ref_shells:
+            return {
+                "success": False,
+                "error": "No valid shell or surface geometry found in one or both models"
+            }
+
+        # Compare properties of the primary shells
+        sub_props = get_shell_properties(sub_shells[0])
+        ref_props = get_shell_properties(ref_shells[0])
+
+        feedback: Dict[str, Any] = {}
+        score = 0
+        total_weights = 0
+
+        # Surface area comparison (40% weight)
+        area_weight = 40
+        area_diff = abs(sub_props["surface_area"] - ref_props["surface_area"])
+        area_ok = area_diff <= tol * 1.5 * max(abs(ref_props["surface_area"]), 1)
+        area_score = 100 - min(100, 100 * area_diff / (abs(ref_props["surface_area"]) if abs(ref_props["surface_area"]) > 1e-6 else 1))
+        feedback["surface_area"] = {"ok": area_ok, "score": round(area_score, 1)}
+        score += area_score * area_weight
+        total_weights += area_weight
+
+        # Topology comparison (30% weight)
+        topo_weight = 30
+        topo_diff = sum(abs(sub_props["topology"][k] - ref_props["topology"][k]) for k in ["edges", "vertices"])
+        topo_ok = topo_diff <= 6  # Allow some topology differences
+        topo_score = 100 if topo_ok else max(0, 100 - (topo_diff - 6) * 10)
+        feedback["topology"] = {"ok": topo_ok, "score": round(topo_score, 1)}
+        score += topo_score * topo_weight
+        total_weights += topo_weight
+
+        # Center of mass comparison (30% weight)
+        com_weight = 30
+        com_diffs = [abs(s - r) for s, r in zip(sub_props["center_of_mass"], ref_props["center_of_mass"])]
+        com_ok = all(diff <= tol * 2 for diff in com_diffs)  # More tolerant for shells
+        com_score = 100 if com_ok else max(0, 100 - sum(com_diffs) * 100)
+        feedback["center_of_mass"] = {"ok": com_ok, "score": round(com_score, 1)}
+        score += com_score * com_weight
+        total_weights += com_weight
+
+        # Calculate weighted average score
+        global_score = round(score / total_weights, 1)
+        feedback["global_score"] = global_score
+        feedback["success"] = global_score >= 75  # More lenient threshold for shells
+
+        return feedback
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error comparing shells: {str(e)}"
+        }
