@@ -38,6 +38,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
+class PathNormalizationMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            # Normalize path by removing double slashes and ensuring single leading slash
+            path = scope["path"]
+            normalized_path = "/" + "/".join(filter(None, path.split("/")))
+            scope["path"] = normalized_path
+        await self.app(scope, receive, send)
+
+app.add_middleware(PathNormalizationMiddleware)
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection on startup"""
@@ -66,12 +80,22 @@ async def health_check():
         return {"status": "unhealthy", "reason": str(e)}
 
 # Middleware CORS
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+origins = os.getenv("CORS_ORIGINS", "*").split(",")
+if "*" not in origins:
+    # Add common development and production URLs if not using wildcard
+    origins.extend([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://mecaflow-backend.onrender.com"
+    ])
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]
 )
