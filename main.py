@@ -2,13 +2,10 @@ from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
 from bson import ObjectId
 import asyncio
-from fastapi import FastAPI, HTTPException, Depends, Body, File, UploadFile, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Body, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.responses import FileResponse
-from fastapi.concurrency import run_in_threadpool
-import concurrent.futures
-import signal
 from pydantic import BaseModel, EmailStr
 from schemas import (
     UpdateProfileRequest, UpdateProfileResponse, RegisterWithCodeRequest,
@@ -31,29 +28,6 @@ import json
 import tempfile
 import logging
 from enum import Enum
-
-# =============================================================================
-# TIMEOUT HANDLING
-# =============================================================================
-
-async def run_with_timeout(func, *args, timeout=30):
-    """Run a function with a timeout using asyncio."""
-    try:
-        # Run the function in a thread pool with timeout
-        return await asyncio.wait_for(
-            run_in_threadpool(func, *args),
-            timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        return {
-            "success": False,
-            "error": f"Operation timed out after {timeout} seconds. The model may be too complex."
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
 
 # =============================================================================
 # INITIALISATION
@@ -1197,34 +1171,43 @@ async def submit_exercise(
         else:
 
                 # Pour les exercices spécifiques (surfacing et shell)
-                if level == "advanced" and order in [2, 15, 16, 17]:  # Exercice 2 (bouteille) + exercices de surfacing
-                    from services.occComparison import compare_shell_models, compare_models
-                    logger.info("Comparing shell/surface models...")
-                    
-                    # For exercise 2 (bottle), try both solid and shell comparison
-                    if order == 2:
-                        # Try solid comparison first with timeout
-                        logger.info("Trying solid comparison first...")
-                        cad_result = await run_with_timeout(compare_models, path, reference_path, timeout=45)
+                if level == "advanced":
+                    if order == 2:  # Special case for bottle exercise
+                        logger.info("Special comparison for bottle exercise (Exercise 2)...")
+                        from services.occComparison import compare_models, get_solids_from_shape, get_shells_from_shape, read_step_file
                         
-                        if not cad_result.get("success", False):
-                            # If solid comparison fails, try shell comparison with timeout
-                            logger.info("Solid comparison failed, trying shell comparison...")
-                            cad_result = await run_with_timeout(compare_shell_models, path, reference_path, timeout=45)
+                        # Read both files
+                        sub_shape = read_step_file(path)
+                        ref_shape = read_step_file(reference_path)
+                        
+                        # Try to get shells and solids from both
+                        sub_shells = get_shells_from_shape(sub_shape)
+                        sub_solids = get_solids_from_shape(sub_shape)
+                        ref_shells = get_shells_from_shape(ref_shape)
+                        ref_solids = get_solids_from_shape(ref_shape)
+                        
+                        # Custom comparison for bottle:
+                        # 1. If both are shells or both are solids, compare them directly
+                        # 2. If one is shell and other is solid, we accept it but with different criteria
+                        if (len(sub_shells) > 0 and len(ref_shells) > 0) or (len(sub_solids) > 0 and len(ref_solids) > 0):
+                            # Direct comparison
+                            cad_result = compare_models(path, reference_path, tol=1e-2)  # Using more tolerant threshold
+                        else:
+                            # Mixed comparison (one shell, one solid) - use more tolerant comparison
+                            cad_result = compare_models(path, reference_path, tol=2e-2)  # Even more tolerant threshold
+                            if not cad_result.get("success", False):
+                                # If first comparison fails, try with even more tolerance
+                                cad_result = compare_models(path, reference_path, tol=5e-2)
                             
-                        if "error" in cad_result and "timed out" in cad_result["error"]:
-                            # If timeout occurred, try with lower precision
-                            logger.info("Timeout occurred, retrying with lower precision...")
-                            cad_result = await run_with_timeout(
-                                compare_models, 
-                                path, 
-                                reference_path, 
-                                tol=1e-2,  # Lower precision
-                                timeout=30
-                            )
-                    else:
-                        # For other surface exercises, use shell comparison with timeout
-                        cad_result = await run_with_timeout(compare_shell_models, path, reference_path, timeout=45)
+                            # Adjust success criteria for mixed comparison
+                            if cad_result.get("global_score", 0) >= 70:  # More lenient score threshold
+                                cad_result["success"] = True
+                                cad_result["message"] = "Géométrie validée (comparaison mixte solid/shell)"
+                    
+                    elif order in [15, 16, 17]:  # Other surfacing exercises
+                        from services.occComparison import compare_shell_models
+                        logger.info("Comparing surface models...")
+                        cad_result = compare_shell_models(path, reference_path)
                 else:
                     # Lire et analyser le fichier soumis pour les pièces solides
                     sub_shape = read_step_file(path)
