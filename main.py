@@ -1080,17 +1080,21 @@ async def submit_exercise(
 
     # --- Special case: manual validation exercises ---
     special_manual = (
-        (level == "advanced" and order in [6, 7, 13, 14]) or
+        (level == "advanced" and order in [2, 6, 7, 13, 14]) or
         (level == "intermediate" and order == 18)
     )
     if special_manual:
         # Vérifier l'extension selon l'exercice
-        if level == "advanced" and order in [6, 7]:
+        if level == "advanced" and order == 2:
+            # Pour l'exercice 2 (bouteille), uniquement SLDPRT
             if ext != ".sldprt":
-                raise HTTPException(status_code=400, detail="Seuls les fichiers .SLDPRT sont autorisés pour cet exercice.")
+                raise HTTPException(status_code=400, detail="Seuls les fichiers SLDPRT sont autorisés pour cet exercice.")
+        elif level == "advanced" and order in [6, 7]:
+            if ext != ".sldprt":
+                raise HTTPException(status_code=400, detail="Seuls les fichiers SLDPRT sont autorisés pour cet exercice.")
         else:
             if ext != ".sldasm":
-                raise HTTPException(status_code=400, detail="Seuls les fichiers .SLDASM sont autorisés pour cet exercice.")
+                raise HTTPException(status_code=400, detail="Seuls les fichiers SLDASM sont autorisés pour cet exercice.")
         file_id = str(uuid.uuid4())
         path = os.path.join(UPLOAD_DIR, "assemblies", f"{file_id}_{filename}")
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1210,7 +1214,7 @@ async def submit_exercise(
         else:
 
                 # Pour les exercices spécifiques (surfacing et shell)
-                if level == "advanced" and order in [2, 15, 16, 17]:  # Exercice 2 (bouteille) + exercices de surfacing
+                if level == "advanced" and order in [4, 5]:  # Exercices de surfacing
                     from services.occComparison import compare_shell_models
                     logger.info("Comparing shell/surface models...")
                     cad_result = compare_shell_models(path, reference_path)
