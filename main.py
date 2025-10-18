@@ -798,6 +798,13 @@ async def create_exercise_api(exercise: ExerciseCreate, current_user: dict = Dep
     diff = ex_dict.get("difficulty")
     if diff is not None and hasattr(diff, "value"):
         ex_dict["difficulty"] = diff.value
+        
+    # Set manual validation for exercise 2
+    ex_dict["is_manual_validation"] = ex_dict.get("order") == 2
+        
+    # Set manual validation for exercise 2
+    if ex_dict.get("order") == 2:
+        ex_dict["is_manual_validation"] = True
     result = await exercises_collection.insert_one(ex_dict)
     ex_dict["_id"] = str(result.inserted_id)
     return {"success": True, "exercise": serialize_doc(ex_dict)}
@@ -1040,11 +1047,12 @@ async def submit_exercise(
         return {"success": True, "submission": serialize_doc(sub_dict)}
 
     # --- Special case: manual validation exercises ---
-    special_manual = (
+    # Check if this exercise requires manual validation
+    is_manual = ex.get("is_manual_validation", False) or (
         (level == "advanced" and order in [2, 6, 7, 13, 14]) or
         (level == "intermediate" and order == 18)
     )
-    if special_manual:
+    if is_manual:
         # Vérifier l'extension selon l'exercice
         if level == "advanced" and order == 2:
             # Pour l'exercice 2 (bouteille), uniquement SLDPRT

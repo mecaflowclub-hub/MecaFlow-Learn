@@ -92,6 +92,7 @@ class ExerciseModel(BaseModel):
     qcm: Optional[List[str]] = []  # Liste d'IDs d'exercices QCM liés
     course_id: Optional[str] = None  # Lien vers le cours parent
     is_active: bool = True
+    is_manual_validation: bool = False  # Indique si l'exercice nécessite une validation manuelle
     created_by: str
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     updatedAt: datetime = Field(default_factory=datetime.utcnow)

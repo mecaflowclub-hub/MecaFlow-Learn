@@ -185,6 +185,7 @@ class ExerciseBase(BaseModel):
     qcm: Optional[List[dict]] = []
     course_id: Optional[str] = None
     order: int  # Required field for exercise ordering
+    is_manual_validation: Optional[bool] = False  # Indique si l'exercice nécessite une validation manuelle
 
 class ExerciseCreate(ExerciseBase):
     pass
