@@ -206,17 +206,78 @@ def get_shape_properties(shape: TopoDS_Shape):
     raise ValueError("No valid geometry (solid, shell, or face) found in shape.")
 
 # -------------------------------
+# Special Exercise Comparisons
+# -------------------------------
+
+def compare_bottle(submitted_path: str, reference_path: str) -> Dict[str, Any]:
+    """Optimized comparison specifically for Exercise 2 (bottle).
+    Handles both solid and shell representations with minimal computation."""
+    try:
+        # Read shapes
+        sub_shape = read_step_file(submitted_path)
+        ref_shape = read_step_file(reference_path)
+        
+        # Get properties with minimal computation
+        bbox_sub = Bnd_Box()
+        bbox_ref = Bnd_Box()
+        brepbndlib.Add(sub_shape, bbox_sub)
+        brepbndlib.Add(ref_shape, bbox_ref)
+        
+        # Get bounding box dimensions
+        xmin_s, ymin_s, zmin_s, xmax_s, ymax_s, zmax_s = bbox_sub.Get()
+        xmin_r, ymin_r, zmin_r, xmax_r, ymax_r, zmax_r = bbox_ref.Get()
+        
+        # Calculate key dimensions
+        height_sub = zmax_s - zmin_s
+        height_ref = zmax_r - zmin_r
+        diameter_sub = max(xmax_s - xmin_s, ymax_s - ymin_s)
+        diameter_ref = max(xmax_r - xmin_r, ymax_r - ymin_r)
+        
+        # Compare dimensions with generous tolerance
+        tol = 2e-2  # 2% tolerance
+        height_ok = abs(height_sub - height_ref) <= tol * height_ref
+        diameter_ok = abs(diameter_sub - diameter_ref) <= tol * diameter_ref
+        
+        # Calculate dimensional scores
+        height_score = 100 - min(100, 100 * abs(height_sub - height_ref) / height_ref)
+        diameter_score = 100 - min(100, 100 * abs(diameter_sub - diameter_ref) / diameter_ref)
+        
+        # Get topology for basic shape verification
+        num_faces_sub = count_subshapes(sub_shape, TopAbs_FACE)
+        num_faces_ref = count_subshapes(ref_shape, TopAbs_FACE)
+        
+        # Allow some variation in face count for shell vs solid
+        faces_ok = abs(num_faces_sub - num_faces_ref) <= 2
+        
+        # Calculate final score
+        dim_score = (height_score + diameter_score) / 2
+        face_score = 100 if faces_ok else max(0, 100 - abs(num_faces_sub - num_faces_ref) * 10)
+        
+        global_score = round(0.7 * dim_score + 0.3 * face_score, 1)
+        
+        return {
+            "success": global_score >= 75,  # More lenient threshold
+            "global_score": global_score,
+            "details": {
+                "height": {"ok": height_ok, "score": round(height_score, 1)},
+                "diameter": {"ok": diameter_ok, "score": round(diameter_score, 1)},
+                "topology": {"ok": faces_ok, "score": round(face_score, 1)}
+            },
+            "message": "Comparaison spécifique bouteille"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error comparing bottle: {str(e)}"
+        }
+
+# -------------------------------
 # Comparison
 # -------------------------------
 
 def compare_models(submitted_path: str, reference_path: str, tol: float = 1e-3) -> Dict[str, Any]:
-    """Compare two STEP models (can handle both single parts and assemblies).
-    
-    Args:
-        submitted_path: Path to the submitted STEP file
-        reference_path: Path to the reference STEP file
-        tol: Tolerance for comparisons (default: 1e-3, use higher values like 1e-2 or 5e-2 for less strict comparison)
-    """
+    """Compare two STEP models (can handle both single parts and assemblies)."""
     sub_shape = read_step_file(submitted_path)
     ref_shape = read_step_file(reference_path)
 
@@ -336,13 +397,5 @@ def compare_models(submitted_path: str, reference_path: str, tol: float = 1e-3) 
         # Calculate global score (average of all scores)
         global_score = round(score / total, 1)
         feedback["global_score"] = global_score
-
-        # Success threshold varies based on tolerance
-        if tol >= 5e-2:  # Very lenient comparison (for mixed solid/shell)
-            feedback["success"] = global_score >= 70
-        elif tol >= 1e-2:  # Moderately lenient comparison
-            feedback["success"] = global_score >= 75
-        else:  # Standard strict comparison
-            feedback["success"] = global_score >= 80
-
+        feedback["success"] = global_score >= 80
         return feedback

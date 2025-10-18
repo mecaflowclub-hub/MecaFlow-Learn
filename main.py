@@ -2,8 +2,6 @@ from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
 from bson import ObjectId
 import asyncio
-import concurrent.futures
-from functools import partial
 from fastapi import FastAPI, HTTPException, Depends, Body, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -30,29 +28,6 @@ import json
 import tempfile
 import logging
 from enum import Enum
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-async def run_with_timeout(func, *args, timeout=30, **kwargs):
-    """Run a function with a timeout using a thread pool."""
-    loop = asyncio.get_event_loop()
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(pool, partial(func, *args, **kwargs)),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            return {
-                "success": False,
-                "error": f"Operation timed out after {timeout} seconds. The model may be too complex."
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Error during comparison: {str(e)}"
-            }
 
 # =============================================================================
 # INITIALISATION
@@ -942,8 +917,47 @@ async def submit_exercise(
     level = course.get("level") if course else "unknown"
     order = ex.get("order")
 
-    # --- Special case: Exo 11 (advanced, DXF drawing) ---
-    if level == "advanced" and order == 11:
+    # --- Special cases for specific exercises ---
+    
+    # Exercise 2 (Bottle) - requires special comparison
+    if order == 2:
+        if ext != ".stp" and ext != ".step":
+            raise HTTPException(status_code=400, detail="Seuls les fichiers STEP sont autorisés pour cet exercice.")
+        file_id = str(uuid.uuid4())
+        path = os.path.join(UPLOAD_DIR, "student-files", f"{file_id}_{filename}")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as buffer:
+            buffer.write(content)
+
+        reference_filename = ex.get("solution_file_path")
+        if not reference_filename:
+            cad_result = {"success": False, "error": "Chemin de référence non défini"}
+        else:
+            reference_filename = reference_filename.lstrip('/')
+            reference_path = os.path.join(UPLOAD_DIR, "reference-files", os.path.basename(reference_filename))
+            
+            logger.info(f"Checking STEP bottle reference file at: {reference_path}")
+            
+            if not os.path.exists(reference_path):
+                cad_result = {
+                    "success": False, 
+                    "error": "Fichier de référence introuvable",
+                    "details": f"Le fichier {reference_path} n'existe pas"
+                }
+            else:
+                try:
+                    from services.occComparison import compare_bottle
+                    cad_result = compare_bottle(path, reference_path)
+                    logger.info(f"Bottle comparison result: {cad_result}")
+                except Exception as e:
+                    logger.error(f"Error during bottle comparison: {str(e)}")
+                    cad_result = {
+                        "success": False,
+                        "error": f"Erreur lors de la comparaison de la bouteille: {str(e)}"
+                    }
+
+    # Exercise 11 (DXF Drawing) special case
+    elif level == "advanced" and order == 11:
         if ext != ".dxf":
             raise HTTPException(status_code=400, detail="Seuls les fichiers DXF sont autorisés pour cet exercice.")
         file_id = str(uuid.uuid4())
@@ -1196,76 +1210,10 @@ async def submit_exercise(
         else:
 
                 # Pour les exercices spécifiques (surfacing et shell)
-                if level == "advanced":
-                    if order == 2:  # Special case for bottle exercise
-                        try:
-                            logger.info("Comparing bottle exercise with timeout...")
-                            # Try comparison with increasing timeouts
-                            timeouts = [30, 45, 60]  # Timeouts in seconds
-                            tolerances = [1e-3, 1e-2, 2e-2]  # Increasing tolerances
-                            
-                            for timeout, tol in zip(timeouts, tolerances):
-                                logger.info(f"Attempting comparison with timeout={timeout}s, tolerance={tol}")
-                                cad_result = await run_with_timeout(
-                                    compare_models,
-                                    path,
-                                    reference_path,
-                                    timeout=timeout,
-                                    tol=tol
-                                )
-                                
-                                if cad_result.get("success", False):
-                                    logger.info("Comparison succeeded!")
-                                    break
-                                if "timed out" not in str(cad_result.get("error", "")):
-                                    logger.info("Comparison failed but not due to timeout")
-                                    break
-                                    
-                                logger.warning(f"Attempt failed: {cad_result.get('error')}")
-                            
-                            if not cad_result.get("success", False):
-                                logger.warning("All comparison attempts failed")
-                        except Exception as e:
-                            logger.error(f"Error during bottle comparison: {str(e)}")
-                            cad_result = {
-                                "success": False,
-                                "error": f"Error comparing bottle model: {str(e)}"
-                            }
-                        logger.info("Special comparison for bottle exercise (Exercise 2)...")
-                        from services.occComparison import compare_models, get_solids_from_shape, get_shells_from_shape, read_step_file
-                        
-                        # Read both files
-                        sub_shape = read_step_file(path)
-                        ref_shape = read_step_file(reference_path)
-                        
-                        # Try to get shells and solids from both
-                        sub_shells = get_shells_from_shape(sub_shape)
-                        sub_solids = get_solids_from_shape(sub_shape)
-                        ref_shells = get_shells_from_shape(ref_shape)
-                        ref_solids = get_solids_from_shape(ref_shape)
-                        
-                        # Custom comparison for bottle:
-                        # 1. If both are shells or both are solids, compare them directly
-                        # 2. If one is shell and other is solid, we accept it but with different criteria
-                        if (len(sub_shells) > 0 and len(ref_shells) > 0) or (len(sub_solids) > 0 and len(ref_solids) > 0):
-                            # Direct comparison
-                            cad_result = compare_models(path, reference_path, tol=1e-2)  # Using more tolerant threshold
-                        else:
-                            # Mixed comparison (one shell, one solid) - use more tolerant comparison
-                            cad_result = compare_models(path, reference_path, tol=2e-2)  # Even more tolerant threshold
-                            if not cad_result.get("success", False):
-                                # If first comparison fails, try with even more tolerance
-                                cad_result = compare_models(path, reference_path, tol=5e-2)
-                            
-                            # Adjust success criteria for mixed comparison
-                            if cad_result.get("global_score", 0) >= 70:  # More lenient score threshold
-                                cad_result["success"] = True
-                                cad_result["message"] = "Géométrie validée (comparaison mixte solid/shell)"
-                    
-                    elif order in [15, 16, 17]:  # Other surfacing exercises
-                        from services.occComparison import compare_shell_models
-                        logger.info("Comparing surface models...")
-                        cad_result = compare_shell_models(path, reference_path)
+                if level == "advanced" and order in [2, 15, 16, 17]:  # Exercice 2 (bouteille) + exercices de surfacing
+                    from services.occComparison import compare_shell_models
+                    logger.info("Comparing shell/surface models...")
+                    cad_result = compare_shell_models(path, reference_path)
                 else:
                     # Lire et analyser le fichier soumis pour les pièces solides
                     sub_shape = read_step_file(path)
