@@ -2,6 +2,8 @@ from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
 from bson import ObjectId
 import asyncio
+import concurrent.futures
+from functools import partial
 from fastapi import FastAPI, HTTPException, Depends, Body, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -28,6 +30,29 @@ import json
 import tempfile
 import logging
 from enum import Enum
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+async def run_with_timeout(func, *args, timeout=30, **kwargs):
+    """Run a function with a timeout using a thread pool."""
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(pool, partial(func, *args, **kwargs)),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            return {
+                "success": False,
+                "error": f"Operation timed out after {timeout} seconds. The model may be too complex."
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Error during comparison: {str(e)}"
+            }
 
 # =============================================================================
 # INITIALISATION
@@ -1173,6 +1198,39 @@ async def submit_exercise(
                 # Pour les exercices spécifiques (surfacing et shell)
                 if level == "advanced":
                     if order == 2:  # Special case for bottle exercise
+                        try:
+                            logger.info("Comparing bottle exercise with timeout...")
+                            # Try comparison with increasing timeouts
+                            timeouts = [30, 45, 60]  # Timeouts in seconds
+                            tolerances = [1e-3, 1e-2, 2e-2]  # Increasing tolerances
+                            
+                            for timeout, tol in zip(timeouts, tolerances):
+                                logger.info(f"Attempting comparison with timeout={timeout}s, tolerance={tol}")
+                                cad_result = await run_with_timeout(
+                                    compare_models,
+                                    path,
+                                    reference_path,
+                                    timeout=timeout,
+                                    tol=tol
+                                )
+                                
+                                if cad_result.get("success", False):
+                                    logger.info("Comparison succeeded!")
+                                    break
+                                if "timed out" not in str(cad_result.get("error", "")):
+                                    logger.info("Comparison failed but not due to timeout")
+                                    break
+                                    
+                                logger.warning(f"Attempt failed: {cad_result.get('error')}")
+                            
+                            if not cad_result.get("success", False):
+                                logger.warning("All comparison attempts failed")
+                        except Exception as e:
+                            logger.error(f"Error during bottle comparison: {str(e)}")
+                            cad_result = {
+                                "success": False,
+                                "error": f"Error comparing bottle model: {str(e)}"
+                            }
                         logger.info("Special comparison for bottle exercise (Exercise 2)...")
                         from services.occComparison import compare_models, get_solids_from_shape, get_shells_from_shape, read_step_file
                         
