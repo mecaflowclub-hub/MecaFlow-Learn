@@ -1183,7 +1183,7 @@ async def submit_exercise(
         else:
 
                 # Pour les exercices spécifiques (surfacing et shell)
-                if level == "advanced" and order in [4, 5]:  # Exercices de surfacing
+                if level == "advanced" and order in [15, 16,17]:  # Exercices de surfacing
                     from services.occComparison import compare_shell_models
                     logger.info("Comparing shell/surface models...")
                     cad_result = compare_shell_models(path, reference_path)
